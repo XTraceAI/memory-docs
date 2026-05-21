@@ -8,7 +8,10 @@
     "light": "#3b54c2",
     "dark": "#15226e"
   },
-  "favicon": "/images/xmem-favicon2.svg",
+  "favicon": {
+    "light": "/images/xmem-favicon-black.svg",
+    "dark": "/images/xmem-favicon-white.svg"
+  },
   "styling": {
     "css": ["styles/custom.css"]
   },
@@ -69,5 +72,8 @@
       "display": "interactive"
     }
   },
-  "logo": "/images/xmem-logo.png"
+  "logo": {
+    "light": "/images/xmem-logo-black.svg",
+    "dark": "/images/xmem-logo-white.svg"
+  }
 }
