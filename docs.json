@@ -8,7 +8,7 @@
     "light": "#3b54c2",
     "dark": "#15226e"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "/images/xmem-favicon.svg",
   "navigation": {
     "tabs": [
       {
@@ -66,5 +66,5 @@
       "display": "interactive"
     }
   },
-  "logo": "/images/xtracedb.png"
+  "logo": "/images/xmem-logo.png"
 }
