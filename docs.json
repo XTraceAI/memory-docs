@@ -1,6 +1,6 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "maple",
+  "theme": "aspen",
   "name": "XTrace Memory",
   "description": "Hosted memory for AI agents. Send conversation turns, get back searchable facts.",
   "colors": {
