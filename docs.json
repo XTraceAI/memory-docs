@@ -32,7 +32,7 @@
       {
         "tab": "API Reference",
         "openapi": {
-          "source": "https://api.staging.xtrace.ai/openapi.json",
+          "source": "https://api.staging.xtrace.ai/openapi.public.json",
           "directory": "api-reference"
         }
       }
