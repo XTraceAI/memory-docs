@@ -26,6 +26,12 @@
               "guides/ingesting-memories",
               "guides/searching-memories"
             ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "guides/typescript-sdk"
+            ]
           }
         ]
       },

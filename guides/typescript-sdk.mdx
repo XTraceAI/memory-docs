@@ -1,0 +1,248 @@
+---
+title: TypeScript SDK
+description: Reference for the @xtraceai/memory package — every class, method, type, and error.
+---
+
+The `@xtraceai/memory` package is the primary supported client. It's a hand-written wrapper over the HTTP API with idiomatic TypeScript types, an exponential-backoff polling helper, async-iterator pagination, and a typed error hierarchy.
+
+```bash
+npm install @xtraceai/memory
+```
+
+Zero runtime dependencies. Node 18+ (native `fetch`). Works in the browser too.
+
+## `MemoryClient`
+
+The entry point. One client serves the whole org.
+
+```ts
+import { MemoryClient } from '@xtraceai/memory';
+
+const client = new MemoryClient({
+  apiKey: process.env.XTRACE_API_KEY!,
+  orgId:  process.env.XTRACE_ORG_ID!,
+});
+```
+
+### Constructor options
+
+| Option | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `apiKey` | `string` | ✓ | — | `xtk_...` API key |
+| `orgId` | `string` | ✓ | — | Organization id, sent as `X-Org-Id` header |
+| `baseUrl` | `string` | — | `https://api.production.xtrace.ai` | Override for staging or self-hosted: e.g. `https://api.staging.xtrace.ai` |
+| `fetch` | `typeof fetch` | — | `globalThis.fetch` | Inject a custom `fetch` (tests, polyfills, instrumentation) |
+| `maxRetries` | `number` | — | `2` | Retries on `5xx` (idempotent methods) and `429` (any method); honors `Retry-After` |
+| `requestIdFactory` | `() => string` | — | `req_<uuid>` | Override the `X-Request-Id` generator |
+
+## `client.memories`
+
+All memory operations live here. Returns a `Memories` instance.
+
+### `ingest(body, options?)`
+
+Submit conversation messages for extraction. Returns an `IngestJob`.
+
+```ts
+const job = await client.memories.ingest({
+  messages: [
+    { role: 'user', content: 'My favorite food is pad see ew.' },
+    { role: 'assistant', content: 'Noted.' },
+  ],
+  user_id: 'alice',
+  conv_id: 'conv_2026_05_16',
+});
+```
+
+**Required body fields**: `messages`, `user_id`, `conv_id`. Optional: `agent_id`, `app_id`, `metadata`, `extract_artifacts`.
+
+**Options**:
+- `wait?: boolean` — if true, the server holds the connection up to 30s and returns a terminal job inline. Falls back to async if extraction is still running at 30s.
+- `signal?: AbortSignal`
+- `requestId?: string`
+
+### `list(query?)` → `AsyncIterable<Memory>`
+
+Auto-paginating async iterator over memories matching the query.
+
+```ts
+for await (const memory of client.memories.list({ user_id: 'alice' })) {
+  console.log(memory.text);
+}
+```
+
+Filter keys (all optional): `user_id`, `agent_id`, `conv_id`, `app_id`, `type`, `limit`, `order`, `include`.
+
+### `listPage(query?)` → `Promise<ListEnvelope<Memory>>`
+
+Single-page version of `list`. Use when you need cursor-level control.
+
+```ts
+const page = await client.memories.listPage({ user_id: 'alice', limit: 50, cursor });
+// page.data, page.has_more, page.next_cursor
+```
+
+### `get(id)` → `Promise<Memory>`
+
+Fetch a single memory by id. Returns the full row, including `details.full_content` for artifacts.
+
+```ts
+const memory = await client.memories.get('5b0d0f7d-d502-...');
+```
+
+### `update(id, patch)` → `Promise<Memory>`
+
+Update text and/or metadata. Metadata is merged onto existing keys, not replaced.
+
+```ts
+await client.memories.update(id, { text: 'Corrected fact.' });
+```
+
+### `delete(id)` → `Promise<void>`
+
+Soft-delete. Sets `details.status` to `"retracted"`; the row is excluded from list/search but still resolvable via `get`.
+
+### `search(body)` → `Promise<SearchListEnvelope>`
+
+Vector + filter search.
+
+```ts
+const results = await client.memories.search({
+  query: 'what does the user like to eat?',
+  filters: { user_id: 'alice' },
+  limit: 10,
+  include: ['context_prompt'],
+});
+```
+
+See [Searching memories](/guides/searching-memories) for the filter DSL.
+
+### `retrieve(body)` → `Promise<SearchListEnvelope>`
+
+Sugar over `search` with `include: ['context_prompt']` automatically added — for agent loops that want an assembled-markdown context block.
+
+## `client.memories.jobs`
+
+### `get(jobId)` → `Promise<IngestJob>`
+
+Poll a single ingest job. Use `pollUntilDone` instead for normal flows.
+
+### `pollUntilDone(jobId, options?)` → `Promise<IngestJob>`
+
+Polls a job until it reaches `succeeded` or `failed`. Exponential backoff starting at 500ms, capped at 5s, default 60s timeout.
+
+```ts
+const done = await client.memories.jobs.pollUntilDone(job.id);
+if (done.status === 'failed') throw new Error(done.error?.message);
+console.log(done.result?.memories_created);
+```
+
+**Options**:
+- `timeoutMs?: number` — default 60_000
+- `initialIntervalMs?: number` — default 500
+- `maxIntervalMs?: number` — default 5_000
+- `backoffFactor?: number` — default 1.5
+- `signal?: AbortSignal`
+
+## Error classes
+
+Every API failure is a subclass of `MemoryError`. Match on the class for HTTP-status handling and on `.code` for stable machine-readable error codes from the server.
+
+```ts
+import { MemoryNotFound, RateLimited, MemoryError } from '@xtraceai/memory';
+
+try {
+  await client.memories.get('does-not-exist');
+} catch (err) {
+  if (err instanceof MemoryNotFound) {
+    // 404
+  } else if (err instanceof RateLimited) {
+    console.log('retry after', err.retryAfter, 'seconds');
+  } else if (err instanceof MemoryError) {
+    console.log(err.status, err.code, err.message);
+  }
+}
+```
+
+| Class | HTTP status |
+|---|---|
+| `BadRequest` | 400 |
+| `Unauthorized` | 401 |
+| `Forbidden` | 403 |
+| `MemoryNotFound` | 404 |
+| `Conflict` | 409 |
+| `Unprocessable` | 422 |
+| `RateLimited` | 429 (adds `.retryAfter: number`) |
+| `ServerError` | 5xx |
+
+Common fields on every error:
+
+- `status: number` — HTTP status code
+- `code: string` — stable machine-readable error code (e.g. `memory_not_found`, `org_mismatch`)
+- `errorType: string` — category (e.g. `invalid_request_error`)
+- `requestId: string | undefined` — propagate to support / logs
+- `details: Record<string, unknown> | undefined` — error-specific extras
+
+## Type exports
+
+The full set of exported types:
+
+```ts
+import type {
+  // Resources
+  Memory,
+  FactMemory,
+  ArtifactMemory,
+  EpisodeMemory,
+  FactDetails,
+  ArtifactDetails,
+  EpisodeDetails,
+  MemoryRef,
+  MemoryType,
+  MemoryStatus,
+
+  // Ingest
+  Message,
+  Role,
+  IngestRequest,
+  IngestJob,
+  IngestJobResult,
+  JobStatus,
+
+  // Read
+  ListQuery,
+  ListEnvelope,
+  SearchRequest,
+  SearchListEnvelope,
+  UpdateRequest,
+  Filter,
+
+  // Errors
+  ApiErrorBody,
+} from '@xtraceai/memory';
+```
+
+`Memory` is a discriminated union — `m.type === 'fact'` narrows `m.details` to `FactDetails`, etc.
+
+## Retries and timeouts
+
+| What | Default | Override |
+|---|---|---|
+| Max retries | 2 | `new MemoryClient({ maxRetries: 5 })` |
+| Retry-eligible methods on 5xx | `GET`, `HEAD` only | n/a |
+| Retry-eligible methods on 429 | any | n/a — always retried, honoring `Retry-After` |
+| Backoff | 250ms · 500ms · 1s · … capped at 5s, with jitter | n/a |
+
+Network errors on idempotent methods also retry.
+
+## Request ids
+
+Every request carries an `X-Request-Id` header (auto-generated `req_<uuid>` by default). The server echoes it; the SDK surfaces it on errors via `err.requestId`. Use it when filing support tickets — it pins down the exact request in our logs.
+
+## See also
+
+- **[Quickstart](/guides/quickstart)** — install and run end-to-end
+- **[Authentication](/guides/authentication)** — credentials, headers, environment selection
+- **[Ingesting memories](/guides/ingesting-memories)** — async/sync, polling, metadata
+- **[Searching memories](/guides/searching-memories)** — filter DSL, pagination, retrieval
+- **API Reference** tab — the underlying HTTP endpoints
