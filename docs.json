@@ -1,6 +1,6 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
+  "theme": "linden",
   "name": "XTrace Memory",
   "description": "Hosted memory for AI agents. Send conversation turns, get back searchable facts.",
   "colors": {
@@ -8,7 +8,7 @@
     "light": "#3b54c2",
     "dark": "#15226e"
   },
-  "favicon": "/images/xmem-favicon-no-space.svg",
+  "favicon": "/images/xmem-favicon2.svg",
   "navigation": {
     "tabs": [
       {
