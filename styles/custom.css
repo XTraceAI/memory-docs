@@ -1,0 +1,16 @@
+/* Custom overrides for Mintlify's built-in theme.
+ *
+ * Some elements (notably the API playground "Try it" button) ship
+ * with hardcoded colors that aren't driven by docs.json's
+ * `colors.primary`. We override them here so the brand color
+ * (the indigo set in Visual Branding) carries through.
+ */
+
+/* API playground "Try it" button — Mintlify hardcodes bg-[#2AB673] */
+.tryit-button {
+  background-color: #21359e !important;
+}
+.tryit-button:hover {
+  background-color: #3b54c2 !important;
+  opacity: 1 !important;
+}

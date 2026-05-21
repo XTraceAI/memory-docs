@@ -9,6 +9,9 @@
     "dark": "#15226e"
   },
   "favicon": "/images/xmem-favicon2.svg",
+  "styling": {
+    "css": ["styles/custom.css"]
+  },
   "navigation": {
     "tabs": [
       {
