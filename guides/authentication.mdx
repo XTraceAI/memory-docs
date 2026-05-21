@@ -5,6 +5,16 @@ description: "How API keys and org headers work — and how to wire them into th
 
 Every request needs two pieces: an **API key** and an **organization id**. The API key alone is not sufficient — the auth layer keys auth records by `(org_id, api_key_hash)` and can't reverse-lookup the org from the key without scanning.
 
+## Get your credentials
+
+Both values come from the XTrace web app:
+
+1. Sign in at **[app.xtrace.ai](https://app.xtrace.ai)**
+2. Open **Settings → API Keys** (or your organization page)
+3. Copy your **Org id** and create a new **API key** (`xtk_…`)
+
+Treat the API key like a password — anyone with it can read and write memories under your org. Store it in a secrets manager or environment variable, never in source control.
+
 ## Headers
 
 ```http
