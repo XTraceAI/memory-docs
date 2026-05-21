@@ -1,6 +1,6 @@
 ---
-title: Authentication
-description: How API keys and org headers work — and how to wire them into the SDK.
+title: "Authentication"
+description: "How API keys and org headers work — and how to wire them into the SDK."
 ---
 
 Every request needs two pieces: an **API key** and an **organization id**. The API key alone is not sufficient — the auth layer keys auth records by `(org_id, api_key_hash)` and can't reverse-lookup the org from the key without scanning.
@@ -15,7 +15,7 @@ X-Org-Id: org_...
 Both required on every request. Missing or mismatched values:
 
 | Error | Cause |
-|---|---|
+| --- | --- |
 | `400 missing_org_id` | No `X-Org-Id` header |
 | `401` | Missing or invalid API key |
 | `403 org_mismatch` | `X-Org-Id` doesn't match the org the key belongs to |
@@ -35,22 +35,10 @@ const client = new MemoryClient({
 
 That's it — every method call on the client carries the right headers.
 
-### Pointing at staging
-
-The default base URL is production (`https://api.production.xtrace.ai`). Override for staging:
-
-```ts
-const client = new MemoryClient({
-  apiKey:  process.env.XTRACE_API_KEY!,
-  orgId:   process.env.XTRACE_ORG_ID!,
-  baseUrl: 'https://api.staging.xtrace.ai',
-});
-```
-
 ## Storing credentials
 
 <Note>
-Never commit API keys to source control. Use environment variables, a secrets manager (AWS Secrets Manager, GCP Secret Manager, 1Password CLI), or a `.env` file that's in `.gitignore`.
+  Never commit API keys to source control. Use environment variables, a secrets manager (AWS Secrets Manager, GCP Secret Manager, 1Password CLI), or a `.env` file that's in `.gitignore`.
 </Note>
 
 A typical setup:
@@ -82,4 +70,4 @@ Keys are long-lived; there is no automatic expiry in v1.
 
 ## Browser vs server
 
-The SDK works in both Node 18+ and modern browsers (it uses native `fetch`). **Don't ship API keys to a browser** — proxy memory-API calls through your own backend so the key never leaves the server.
+The SDK works in both Node 18\+ and modern browsers (it uses native `fetch`). **Don't ship API keys to a browser** — proxy memory-API calls through your own backend so the key never leaves the server.

@@ -4,9 +4,9 @@
   "name": "XTrace Memory",
   "description": "Hosted memory for AI agents. Send conversation turns, get back searchable facts.",
   "colors": {
-    "primary": "#10b981",
-    "light": "#34d399",
-    "dark": "#059669"
+    "primary": "#21359e",
+    "light": "#3b54c2",
+    "dark": "#15226e"
   },
   "favicon": "/favicon.svg",
   "navigation": {
