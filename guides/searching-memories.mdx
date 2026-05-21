@@ -1,0 +1,158 @@
+---
+title: Searching memories
+description: Vector + filter search over the memories you've ingested.
+---
+
+Once a memory is ingested and the job reaches `succeeded`, it's immediately queryable. There are two read endpoints:
+
+- **`search`** — vector + filter ranked retrieval. Use when you have a natural-language query.
+- **`list`** — paginated browse with flat-equality filtering. Use when you don't have a query (e.g. "all of Alice's memories").
+
+## Vector search
+
+```ts
+const results = await client.memories.search({
+  query: 'what does the user like to eat?',
+  filters: { user_id: 'alice' },
+  limit: 10,
+});
+
+for (const m of results.data) {
+  console.log(m.score?.toFixed(2), '·', m.text);
+}
+```
+
+Required: `query` (non-empty string). The server embeds it and ranks results by cosine similarity.
+
+The response is a Stripe-style list envelope:
+
+```ts
+{
+  object: 'list',
+  data: [ /* Memory[], with .score populated */ ],
+  has_more: false,
+  next_cursor: null,
+  extras: null,  // populated only when `include` is set
+}
+```
+
+## Filter DSL
+
+`filters` is a key→condition map. Top-level keys are implicit-AND.
+
+### Flat equality (most common)
+
+```ts
+{ user_id: 'alice', project: 'atlas' }
+// → user_id == "alice" AND project == "atlas"
+```
+
+### Operators
+
+```ts
+// Set membership
+{ project: { $in: ['atlas', 'mercury'] } }
+
+// Negation
+{ priority: { $ne: 'low' } }
+
+// Range
+{ created_at: { $gte: '2026-01-01', $lte: '2026-12-31' } }
+{ score:      { $between: [0.5, 0.9] } }
+```
+
+### Boolean composition
+
+```ts
+{
+  AND: [
+    { user_id: 'alice' },
+    {
+      OR: [
+        { project: 'atlas' },
+        { project: 'mercury', priority: 'high' },
+      ],
+    },
+  ],
+}
+
+// Negation
+{ NOT: { channel: 'internal' } }
+```
+
+### Restricting by memory type
+
+`type` is a first-class filter axis:
+
+```ts
+{ user_id: 'alice', type: 'fact' }              // facts only
+{ user_id: 'alice', type: { $in: ['fact', 'episode'] } }
+```
+
+## Cursor pagination
+
+The response carries `has_more` and `next_cursor`. The SDK exposes an async iterator that handles pagination automatically:
+
+```ts
+for await (const memory of client.memories.list({ user_id: 'alice', limit: 50 })) {
+  // …each memory across all pages
+}
+```
+
+For single-page access (when you need cursor-level control), use `listPage`:
+
+```ts
+const page = await client.memories.listPage({
+  user_id: 'alice',
+  limit: 50,
+  cursor,
+});
+```
+
+Cursors are tenant-scoped — a cursor from one `(org, key)` pair can't be used by another.
+
+## Retrieving a single memory
+
+```ts
+const memory = await client.memories.get('5b0d0f7d-d502-45d5-847d-e19512b5c517');
+```
+
+Returns the full row, including `details.full_content` for artifacts (omitted from list/search responses by default).
+
+## Composed retrieval — `context_prompt`
+
+For agent loops that want the assembled-markdown context to drop directly into an LLM prompt:
+
+```ts
+const results = await client.memories.search({
+  query: 'what should I know about the user?',
+  filters: { user_id: 'alice', conv_id: 'conv_42' },
+  include: ['context_prompt'],
+});
+
+const prompt = results.extras?.context_prompt;
+// → "## What we know about the user\n- Vegetarian\n- Loves pad see ew\n- ..."
+```
+
+<Note>
+`context_prompt` runs an additional retrieval-agent pass over the top results — higher latency, metered separately. It requires both `user_id` **and** `conv_id` in `filters`.
+</Note>
+
+## Including artifact full content
+
+Artifact rows omit `details.full_content` from list/search responses by default (it can be megabytes). Opt in:
+
+```ts
+const page = await client.memories.search({
+  query: 'design doc',
+  filters: { user_id: 'alice', type: 'artifact' },
+  include: ['full_content'],
+});
+```
+
+No-op for fact and episode rows.
+
+## See also
+
+- **[Ingesting memories](/guides/ingesting-memories)** — what gets stored that you're then searching
+- **API Reference → Memories → Search** — every field and operator

@@ -1,0 +1,81 @@
+---
+title: Quickstart
+description: Install the SDK, ingest a conversation turn, and search it back — in under five minutes.
+---
+
+End-to-end in 5 minutes. By the end you'll have a memory ingested and retrieved via vector search.
+
+## 1. Install
+
+```bash
+npm install @xtraceai/memory
+```
+
+Node 18 or newer. Works in the browser too.
+
+## 2. Get credentials
+
+You'll need two values:
+
+| Value | Looks like | Where it comes from |
+|---|---|---|
+| API key | `xtk_…` | Issued to your account |
+| Org id | `org_…` (or any short string) | Your organization namespace |
+
+Both are required on every request — the API key alone is not sufficient.
+
+## 3. Ingest a memory
+
+```ts
+import { MemoryClient } from '@xtraceai/memory';
+
+const client = new MemoryClient({
+  apiKey: process.env.XTRACE_API_KEY!,
+  orgId:  process.env.XTRACE_ORG_ID!,
+});
+
+const job = await client.memories.ingest({
+  messages: [
+    { role: 'user', content: 'My favorite food is pad see ew. I love Thai cuisine.' },
+    { role: 'assistant', content: 'Got it — pad see ew noted.' },
+  ],
+  user_id: 'alice',
+  conv_id: 'conv_2026_05_16',
+});
+
+console.log('Ingest job:', job.id, 'status:', job.status);
+```
+
+The call returns immediately with a job in `status: "pending"` or `"running"`. Extraction runs server-side (3–10 seconds typical).
+
+## 4. Wait for extraction to finish
+
+```ts
+const done = await client.memories.jobs.pollUntilDone(job.id);
+console.log('Memories created:', done.result?.memories_created);
+```
+
+The SDK's `pollUntilDone` helper handles exponential backoff (500ms → 5s) and a configurable timeout. You can also opt into **synchronous mode** by passing `{ wait: true }` on ingest — the server holds the connection up to 30 seconds. See [Ingesting memories](/guides/ingesting-memories) for the full pattern.
+
+## 5. Search the memory back
+
+```ts
+const results = await client.memories.search({
+  query: 'what does the user like to eat?',
+  filters: { user_id: 'alice' },
+  limit: 5,
+});
+
+for (const m of results.data) {
+  console.log(m.score?.toFixed(2), '·', m.text);
+}
+// 0.87 · User loves Thai cuisine.
+// 0.82 · User's favorite food is pad see ew.
+```
+
+## What's next
+
+- **[Authentication](/guides/authentication)** — get the credentials and use them
+- **[Ingesting memories](/guides/ingesting-memories)** — async/sync trade-offs, polling, what gets extracted
+- **[Searching memories](/guides/searching-memories)** — filter DSL, pagination, retrieval modes
+- **API Reference** tab — every endpoint, every response shape
