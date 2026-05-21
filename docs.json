@@ -8,7 +8,7 @@
     "light": "#3b54c2",
     "dark": "#15226e"
   },
-  "favicon": "/images/xmem-favicon.svg",
+  "favicon": "/images/xmem-favicon-no-space.svg",
   "navigation": {
     "tabs": [
       {
