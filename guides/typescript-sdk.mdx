@@ -54,7 +54,7 @@ const job = await client.memories.ingest({
 });
 ```
 
-**Required body fields**: `messages`, `user_id`, `conv_id`. Optional: `agent_id`, `app_id`, `metadata`, `extract_artifacts`.
+**Required body fields**: `messages`, `user_id`, `conv_id`. Optional: `agent_id`, `app_id`, `metadata`, `extract_artifacts` (defaults to `true` — pass `false` to skip the artifact-extraction stage).
 
 **Options**:
 - `wait?: boolean` — if true, the server holds the connection up to 30s and returns a terminal job inline. Falls back to async if extraction is still running at 30s.

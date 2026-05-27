@@ -29,7 +29,7 @@ Every ingest needs:
 - `user_id` — keys the per-user session namespace
 - `conv_id` — anchors every extracted memory to a conversation (for replay, export, bulk retract)
 
-Optional: `agent_id`, `app_id`, `metadata` (arbitrary key/value, becomes filterable on search), `extract_artifacts: true` (opts into the more expensive artifact-extraction stage).
+Optional: `agent_id`, `app_id`, `metadata` (arbitrary key/value, becomes filterable on search), `extract_artifacts` (defaults to `true` — pass `false` to skip the artifact-extraction stage, the most expensive part of the pipeline).
 
 ## Async ingest (default)
 
@@ -90,7 +90,7 @@ You pass messages; you don't pre-decide what's a fact vs an artifact vs an episo
 | Type | Triggered when |
 |---|---|
 | **Fact** | The default. A semantic claim in a turn ("User likes X", "User works at Y"). |
-| **Artifact** | The conversation references a structured object — a doc, code snippet, summary — that's worth storing standalone. Requires `extract_artifacts: true` on ingest. |
+| **Artifact** | The conversation references a structured object — a doc, code snippet, summary — that's worth storing standalone. Extracted by default; pass `extract_artifacts: false` to skip this stage. |
 | **Episode** | A stretch of turns gets summarized into a session-level memory. Server-driven; no client knob. |
 
 The `result.memories_created` array tells you what landed; each entry is a thin reference (`{id, type, text}`). For the full row, call `client.memories.get(id)`.
