@@ -54,7 +54,7 @@ const job = await client.memories.ingest({
 });
 ```
 
-**Required body fields**: `messages`, `user_id`, `conv_id`. Optional: `agent_id`, `app_id`, `metadata`, `extract_artifacts` (defaults to `true` — pass `false` to skip the artifact-extraction stage).
+**Required body fields**: `messages`, `user_id`, `conv_id`. Optional: `agent_id`, `app_id`, `group_ids` (tag the extracted memories to [groups](/guides/groups)), `timestamp_format`, `extract_artifacts` (defaults to `true` — pass `false` to skip the artifact-extraction stage).
 
 **Options**:
 - `wait?: boolean` — if true, the server holds the connection up to 30s and returns a terminal job inline. Falls back to async if extraction is still running at 30s.
@@ -90,36 +90,50 @@ Fetch a single memory by id. Returns the full row, including `details.full_conte
 const memory = await client.memories.get('5b0d0f7d-d502-...');
 ```
 
-### `update(id, patch)` → `Promise<Memory>`
-
-Update text and/or metadata. Metadata is merged onto existing keys, not replaced.
-
-```ts
-await client.memories.update(id, { text: 'Corrected fact.' });
-```
-
 ### `delete(id)` → `Promise<void>`
 
-Soft-delete. Sets `details.status` to `"retracted"`; the row is excluded from list/search but still resolvable via `get`.
+**Hard delete.** Removes the point outright — afterwards `get` 404s, it's gone from list/search, and a second delete 404s (idempotent by absence). There is no `update` method: corrections flow through ingest (re-ingesting the corrected statement supersedes the old one).
+
+```ts
+await client.memories.delete('5b0d0f7d-d502-...');
+```
 
 ### `search(body)` → `Promise<SearchListEnvelope>`
 
-Vector + filter search.
+Vector search, scoped by what you pass (`user_id` / `group_ids` / `agent_id` / `app_id` — all AND-narrow; at least one required). `mode` defaults to `compose`.
 
 ```ts
 const results = await client.memories.search({
   query: 'what does the user like to eat?',
-  filters: { user_id: 'alice' },
+  user_id: 'alice',
   limit: 10,
-  include: ['context_prompt'],
 });
+// results.data — ranked rows;  results.context — assembled prompt when mode==='compose'
 ```
 
-See [Searching memories](/guides/searching-memories) for the filter DSL.
+See [Searching memories](/guides/searching-memories) for scoping, modes, and groups.
 
 ### `retrieve(body)` → `Promise<SearchListEnvelope>`
 
-Sugar over `search` with `include: ['context_prompt']` automatically added — for agent loops that want an assembled-markdown context block.
+Sugar over `search` that forces `mode: 'compose'` — the response's `context` carries the LLM-assembled, ready-to-inject prompt.
+
+### `recall(params, options?)` → `Promise<RecallResult>`
+
+Personal **+** shared (group) read in one call. Fans out a `search` per scope, dedupes by id, and renders a single prompt sectioned by Personal + group name (shared lines attributed to their author). This is the combined read that AND-scoping can't express in a single `search`.
+
+```ts
+const { prompt, memories, scopes } = await client.memories.recall({
+  query: 'what should we plan for dinner on the trip?',
+  user_id: 'alice',             // personal scope
+  group_ids: ['grp_tokyo2026'], // shared scope (any-of)
+});
+// inject `prompt`; `memories` is the deduped, score-ranked union; `scopes` is per-scope counts
+```
+
+**Params**: `query` (required), plus at least one of `user_id` / `group_ids`; optional `agent_id`, `app_id`, `mode` (default `compose`), `limit` (default 10).
+**Options**: `template?` (override the prompt format — see `PromptTemplate`), `render?` (supply your own renderer), `signal?`, `requestId?`.
+
+`renderMemoriesPrompt(memories, opts?)` is also exported standalone if you want to format a memory list yourself.
 
 ## `client.memories.jobs`
 
@@ -143,6 +157,26 @@ console.log(done.result?.memories_created);
 - `maxIntervalMs?: number` — default 5_000
 - `backoffFactor?: number` — default 1.5
 - `signal?: AbortSignal`
+
+## `client.groups`
+
+Register and manage **groups** — shared tagging targets. Register a group, then pass its id in `ingest({ group_ids })` and read it back with `search`/`recall`. See the [Groups guide](/guides/groups).
+
+```ts
+const trip = await client.groups.create({
+  name: 'Tokyo trip 2026',
+  prompt: 'Facts about the Tokyo trip: hotels, restaurants, dates, dietary needs.',
+});
+// trip.id === "grp_…"
+```
+
+| Method | Returns | Notes |
+|---|---|---|
+| `create({ name, prompt })` | `Group` | `prompt` tells the ingest classifier what belongs to this group |
+| `list()` | `Group[]` | all groups (active + archived) |
+| `get(id)` | `Group` | |
+| `update(id, { name?, prompt?, status? })` | `Group` | edit / re-prompt; `status: 'archived'` archives |
+| `archive(id)` | `Group` | soft-archive — drops the group from future ingest tagging |
 
 ## Error classes
 
@@ -214,12 +248,30 @@ import type {
   ListEnvelope,
   SearchRequest,
   SearchListEnvelope,
-  UpdateRequest,
-  Filter,
+  SearchMode,
+
+  // Recall + prompt rendering
+  RecallParams,
+  RecallResult,
+  RecallScopeStat,
+  PromptTemplate,
+
+  // Groups
+  Group,
+  GroupStatus,
+  GroupCreateRequest,
+  GroupUpdateRequest,
+  GroupListEnvelope,
 
   // Errors
   ApiErrorBody,
 } from '@xtraceai/memory';
+```
+
+`renderMemoriesPrompt` and `DEFAULT_PROMPT_TEMPLATE` are exported as values (not types):
+
+```ts
+import { renderMemoriesPrompt, DEFAULT_PROMPT_TEMPLATE } from '@xtraceai/memory';
 ```
 
 `Memory` is a discriminated union — `m.type === 'fact'` narrows `m.details` to `FactDetails`, etc.
@@ -243,6 +295,7 @@ Every request carries an `X-Request-Id` header (auto-generated `req_<uuid>` by d
 
 - **[Quickstart](/guides/quickstart)** — install and run end-to-end
 - **[Authentication](/guides/authentication)** — credentials, headers, environment selection
-- **[Ingesting memories](/guides/ingesting-memories)** — async/sync, polling, metadata
-- **[Searching memories](/guides/searching-memories)** — filter DSL, pagination, retrieval
+- **[Ingesting memories](/guides/ingesting-memories)** — async/sync, polling, group tagging
+- **[Searching memories](/guides/searching-memories)** — scoping, modes, `recall`
+- **[Groups](/guides/groups)** — share memory across users
 - **API Reference** tab — the underlying HTTP endpoints

@@ -30,7 +30,8 @@
               "guides/quickstart",
               "guides/authentication",
               "guides/ingesting-memories",
-              "guides/searching-memories"
+              "guides/searching-memories",
+              "guides/groups"
             ]
           },
           {

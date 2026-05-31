@@ -1,19 +1,20 @@
 ---
 title: Searching memories
-description: Vector + filter search over the memories you've ingested.
+description: Vector search scoped by what you pass — a user's own memories, shared groups, or both.
 ---
 
-Once a memory is ingested and the job reaches `succeeded`, it's immediately queryable. There are two read endpoints:
+Once a memory is ingested and the job reaches `succeeded`, it's immediately queryable. There are three read paths:
 
-- **`search`** — vector + filter ranked retrieval. Use when you have a natural-language query.
-- **`list`** — paginated browse with flat-equality filtering. Use when you don't have a query (e.g. "all of Alice's memories").
+- **`search`** — vector-ranked retrieval, scoped by the ids you pass. Use when you have a natural-language query.
+- **`list`** — paginated browse by scope, no query. Use for "all of Alice's memories".
+- **`recall`** — convenience over `search` that combines a user's own memories **and** a shared group's into one ready-to-inject prompt (see [below](#personal-shared-with-recall)).
 
 ## Vector search
 
 ```ts
 const results = await client.memories.search({
   query: 'what does the user like to eat?',
-  filters: { user_id: 'alice' },
+  user_id: 'alice',
   limit: 10,
 });
 
@@ -22,76 +23,83 @@ for (const m of results.data) {
 }
 ```
 
-Required: `query` (non-empty string). The server embeds it and ranks results by cosine similarity.
+`query` is required (non-empty). The server embeds it and ranks by cosine similarity; `data` is a list of `Memory` rows with `.score` populated.
 
-The response is a Stripe-style list envelope:
+## Scoping a search
+
+There is **no filter DSL**. Search is *"scope by what you pass"*: supply any combination of the axes below and each one **AND-narrows** the result. An omitted axis is unconstrained, and **at least one** axis is required — an unscoped search returns `422`.
+
+| Axis | Scopes to |
+|---|---|
+| `user_id` | one user's memories |
+| `group_ids` | memories tagged to **any** of these groups (cross-user) |
+| `agent_id` | one agent |
+| `app_id` | one app |
 
 ```ts
-{
-  object: 'list',
-  data: [ /* Memory[], with .score populated */ ],
-  has_more: false,
-  next_cursor: null,
-  extras: null,  // populated only when `include` is set
-}
+// Alice's memories only
+await client.memories.search({ query, user_id: 'alice' });
+
+// Alice's memories, narrowed to one agent
+await client.memories.search({ query, user_id: 'alice', agent_id: 'planner' });
 ```
 
-## Filter DSL
+Everything you pass is AND'd together; your `org` is always implicit (from the API key).
 
-`filters` is a key→condition map. Top-level keys are implicit-AND.
+<Note>
+`user_id` is **required on ingest** but **optional on search** — omit it and pass `group_ids` to read a whole group across users (next section).
+</Note>
 
-### Flat equality (most common)
+## Reading shared memories (groups)
+
+Memories [tagged to a group](/guides/ingesting-memories#tagging-memories-to-groups) at ingest are visible to anyone who searches that group. `group_ids` matches **any-of** — a row tagged to *any* of the requested groups qualifies.
 
 ```ts
-{ user_id: 'alice', project: 'atlas' }
-// → user_id == "alice" AND project == "atlas"
+// The whole Tokyo trip, across every member — omit user_id:
+await client.memories.search({ query, group_ids: ['grp_tokyo2026'] });
+
+// Alice's OWN slice of the trip (intersection: user_id AND group):
+await client.memories.search({ query, user_id: 'alice', group_ids: ['grp_tokyo2026'] });
 ```
 
-### Operators
+Because scoping is AND-everything, `{ user_id, group_ids }` is an **intersection** (Alice's rows that are *also* tagged to the trip), not a union. For *"Alice's own memories **plus** the trip's shared memories"* in one call, use `recall`.
+
+## Personal and shared with recall
+
+`recall` runs the personal and shared scopes in parallel, dedupes, and returns a single context block — the combined read that AND-scoping can't express in one `search`.
 
 ```ts
-// Set membership
-{ project: { $in: ['atlas', 'mercury'] } }
-
-// Negation
-{ priority: { $ne: 'low' } }
-
-// Range
-{ created_at: { $gte: '2026-01-01', $lte: '2026-12-31' } }
-{ score:      { $between: [0.5, 0.9] } }
+const { prompt, memories } = await client.memories.recall({
+  query: 'what should we plan for dinner on the trip?',
+  user_id: 'alice',             // her dietary prefs
+  group_ids: ['grp_tokyo2026'], // the group's shared restaurant picks
+});
+// inject `prompt` into your agent's context
 ```
 
-### Boolean composition
+`prompt` is sectioned by **Personal** + each group's name, with shared lines attributed to their author (`you:` / `<user_id>:`). It resolves group names automatically and won't bleed in the user's *other* groups. Full options in the [SDK reference](/guides/typescript-sdk) and the [Groups guide](/guides/groups).
+
+## Search modes: `retrieve` vs `compose`
+
+`mode` controls whether the server's LLM context-selection pass runs:
+
+| `mode` | `data` | `context` | Use when |
+|---|---|---|---|
+| `compose` *(default)* | the **agent-selected** subset | assembled markdown block | you want a ready-to-inject context prompt |
+| `retrieve` | the **raw** vector-ranked rows | `null` | you want pure results to process yourself — cheaper, no LLM |
 
 ```ts
-{
-  AND: [
-    { user_id: 'alice' },
-    {
-      OR: [
-        { project: 'atlas' },
-        { project: 'mercury', priority: 'high' },
-      ],
-    },
-  ],
-}
+// Raw rows, no LLM pass:
+const raw = await client.memories.search({ query, user_id: 'alice', mode: 'retrieve' });
 
-// Negation
-{ NOT: { channel: 'internal' } }
-```
-
-### Restricting by memory type
-
-`type` is a first-class filter axis:
-
-```ts
-{ user_id: 'alice', type: 'fact' }              // facts only
-{ user_id: 'alice', type: { $in: ['fact', 'episode'] } }
+// Assembled context for a prompt (default):
+const composed = await client.memories.search({ query, user_id: 'alice', mode: 'compose' });
+console.log(composed.context); // "Relevant memories about the user:\n- ..."
 ```
 
 ## Cursor pagination
 
-The response carries `has_more` and `next_cursor`. The SDK exposes an async iterator that handles pagination automatically:
+`search` and `list` return `has_more` and `next_cursor`. The SDK's `list` is an async iterator that paginates automatically:
 
 ```ts
 for await (const memory of client.memories.list({ user_id: 'alice', limit: 50 })) {
@@ -99,17 +107,13 @@ for await (const memory of client.memories.list({ user_id: 'alice', limit: 50 })
 }
 ```
 
-For single-page access (when you need cursor-level control), use `listPage`:
+For cursor-level control use `listPage`:
 
 ```ts
-const page = await client.memories.listPage({
-  user_id: 'alice',
-  limit: 50,
-  cursor,
-});
+const page = await client.memories.listPage({ user_id: 'alice', limit: 50, cursor });
 ```
 
-Cursors are tenant-scoped — a cursor from one `(org, key)` pair can't be used by another.
+`list` accepts the same scope keys plus `type` (`fact` | `artifact` | `episode`) and `order`. Cursors are tenant-scoped — a cursor from one `(org, key)` pair can't be used by another.
 
 ## Retrieving a single memory
 
@@ -117,42 +121,10 @@ Cursors are tenant-scoped — a cursor from one `(org, key)` pair can't be used 
 const memory = await client.memories.get('5b0d0f7d-d502-45d5-847d-e19512b5c517');
 ```
 
-Returns the full row, including `details.full_content` for artifacts (omitted from list/search responses by default).
-
-## Composed retrieval — `context_prompt`
-
-For agent loops that want the assembled-markdown context to drop directly into an LLM prompt:
-
-```ts
-const results = await client.memories.search({
-  query: 'what should I know about the user?',
-  filters: { user_id: 'alice', conv_id: 'conv_42' },
-  include: ['context_prompt'],
-});
-
-const prompt = results.extras?.context_prompt;
-// → "## What we know about the user\n- Vegetarian\n- Loves pad see ew\n- ..."
-```
-
-<Note>
-`context_prompt` runs an additional retrieval-agent pass over the top results — higher latency, metered separately. It requires both `user_id` **and** `conv_id` in `filters`.
-</Note>
-
-## Including artifact full content
-
-Artifact rows omit `details.full_content` from list/search responses by default (it can be megabytes). Opt in:
-
-```ts
-const page = await client.memories.search({
-  query: 'design doc',
-  filters: { user_id: 'alice', type: 'artifact' },
-  include: ['full_content'],
-});
-```
-
-No-op for fact and episode rows.
+Returns the full row — including `details.full_content` for artifacts, which search and list omit by default (it can be large). 404s if the id doesn't exist or was deleted.
 
 ## See also
 
-- **[Ingesting memories](/guides/ingesting-memories)** — what gets stored that you're then searching
-- **API Reference → Memories → Search** — every field and operator
+- **[Ingesting memories](/guides/ingesting-memories)** — what gets stored, and tagging to groups
+- **[Groups](/guides/groups)** — register groups and share memory across users
+- **API Reference → Memories → Search** — every field, generated from the live spec

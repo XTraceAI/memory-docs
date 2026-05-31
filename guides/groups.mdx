@@ -1,0 +1,93 @@
+---
+title: Groups
+description: Share memory across users. Register a group, tag memories to it at ingest, and let every member search them.
+---
+
+By default a memory is scoped to the `user_id` that ingested it. **Groups** let you share memory *across users*: tag a memory to a group at ingest, and anyone who searches that group can see it.
+
+The motivating case is collaborative agents — e.g. a **travel-planning** assistant where each trip is a group. Every traveler's AI tags trip-relevant facts to the trip's group, so the whole party shares one evolving picture (hotels, restaurants, dates) while each person's unrelated personal memories stay private.
+
+## The model
+
+- A **group** is a registry entry with a `name` and a `prompt`. The `prompt` describes *what belongs* in the group — it's what the ingest classifier reads to decide which extracted memories to tag.
+- Group ids are server-generated, unguessable handles (`grp_…`). **Knowing the id is the access boundary** — your client decides which users belong to which groups and which ids to send; the memory service doesn't track membership.
+- Tagging is **additive**: tagging a memory to a group never removes it from the author's own scope.
+
+## 1. Register a group
+
+```ts
+const trip = await client.groups.create({
+  name: 'Tokyo trip 2026',
+  prompt:
+    'Facts about the Tokyo trip in May 2026: flights, hotels, restaurants, ' +
+    'reservations, and dietary needs for this trip.',
+});
+
+console.log(trip.id); // "grp_4f14…"
+```
+
+Write the `prompt` the way you'd brief the classifier: concrete about what to include. A sharp prompt ("facts about the **Tokyo** trip") tags precisely; a vague one over- or under-tags.
+
+## 2. Tag memories at ingest
+
+Pass the group ids in `group_ids`. At extraction time the classifier reads each group's prompt and tags the extracted memories that belong to it.
+
+```ts
+await client.memories.ingest({
+  messages: [
+    { role: 'user', content: "When I'm in Tokyo I always stay near Shibuya station." },
+    { role: 'assistant', content: 'Noted.' },
+  ],
+  user_id: 'alice',
+  conv_id: 'conv_2026_05_16',
+  group_ids: [trip.id],
+});
+```
+
+- Each extracted memory is tagged with the **subset** of `group_ids` it belongs to — several, one, or none. ("Stays near Shibuya" → tagged to the Tokyo trip; "I'm vegetarian" → likely left untagged, as a general preference.)
+- Unknown or archived ids are **soft-skipped** (never fail the ingest) and returned in `result.ignored_group_ids`.
+- Up to **20** group ids per ingest; more returns `422`.
+
+## 3. Read shared memories back
+
+**The whole group, across every member** — omit `user_id`, pass `group_ids`:
+
+```ts
+const shared = await client.memories.search({
+  query: 'where is everyone staying?',
+  group_ids: [trip.id],
+});
+```
+
+**A user's own memories *plus* the group's shared memories**, in one ready-to-inject prompt — use `recall`:
+
+```ts
+const { prompt } = await client.memories.recall({
+  query: 'what should we plan for dinner?',
+  user_id: 'alice',       // her dietary prefs
+  group_ids: [trip.id],   // the trip's shared restaurant picks
+});
+```
+
+`recall` sections the prompt by **Personal** + the group's name and attributes each shared line to its author (`you:` for the caller, `<user_id>:` for fellow members). See [Searching memories](/guides/searching-memories#personal-and-shared-with-recall) for the full picture, including how AND-scoping makes `{ user_id, group_ids }` on a plain `search` an *intersection* rather than a union.
+
+<Note>
+Group membership matching is **any-of**: pass `group_ids: [tripA, tripB]` to search across both trips at once (a user can belong to many groups).
+</Note>
+
+## Managing groups
+
+```ts
+await client.groups.list();                          // all groups (active + archived)
+await client.groups.get(trip.id);
+await client.groups.update(trip.id, { prompt: '…' }); // re-prompt the classifier
+await client.groups.archive(trip.id);                // soft-archive
+```
+
+Archiving is soft (`status` becomes `"archived"`): the group stays readable, but it's **dropped from future ingest tagging** — a stale id passed on ingest just lands in `ignored_group_ids`. Re-activate by `update(id, { status: 'active' })`.
+
+## See also
+
+- **[Ingesting memories](/guides/ingesting-memories#tagging-memories-to-groups)** — the `group_ids` tagging path
+- **[Searching memories](/guides/searching-memories)** — scoping, `recall`, search modes
+- **[TypeScript SDK](/guides/typescript-sdk)** — `client.groups` method reference
