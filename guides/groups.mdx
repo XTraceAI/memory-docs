@@ -86,6 +86,32 @@ await client.groups.archive(trip.id);                // soft-archive
 
 Archiving is soft (`status` becomes `"archived"`): the group stays readable, but it's **dropped from future ingest tagging** — a stale id passed on ingest just lands in `ignored_group_ids`. Re-activate by `update(id, { status: 'active' })`.
 
+## Best practices
+
+**Model a group around a real shared boundary.** A group should map to something multiple users genuinely share — a trip, a project, a workspace channel — not a single user (that's what `user_id` is for) and not a throwaway topic. If only one person will ever read it, it doesn't need to be a group.
+
+**Write the `prompt` like a brief to the classifier.** It's the *only* signal used to decide what gets tagged. Name the subject so unrelated facts don't leak in:
+
+| | Prompt |
+|---|---|
+| ✅ Sharp | "Facts about the **Tokyo trip in May 2026**: flights, hotels, restaurants, reservations, and dietary needs for *this trip*." |
+| ❌ Vague | "Travel stuff." — over- or under-tags |
+
+**Send only the groups the user is actually in.** Your app owns membership; pass the `group_ids` relevant to *this* conversation, not every group in the org. A tighter list means sharper tagging and less cross-trip noise. (Max 20 per ingest.)
+
+**Keep personal personal.** Untagged memories stay private to the user — only tagged ones cross to the group. Scope the group `prompt` to genuinely shared concerns so a user's general preferences don't get pulled into a group they don't belong in.
+
+**Pick the right read for the job:**
+- An agent serving **one user inside a group** → `recall({ user_id, group_ids })` — their own context *plus* the group's, deduped and attributed.
+- A **whole-group overview** ("what does the trip know?") → `search({ group_ids })`, omit `user_id`.
+- Don't expect `search({ user_id, group_ids })` to union — it's an **intersection** (see [Searching memories](/guides/searching-memories#personal-and-shared-with-recall)).
+
+**Treat tagging as best-effort.** Whether a fact lands in a group is an LLM relevance call, not a guarantee — don't build logic that *requires* a specific fact to be tagged. Always read `result.ignored_group_ids` to catch unknown or archived ids.
+
+**Group ids are the access boundary.** They're unguessable (`grp_…`) and the service doesn't track membership — your app decides who can read a group. Don't expose a group id to anyone who shouldn't see the group, and don't tag anything you wouldn't want *every* member to read.
+
+**Archive groups when they're done.** A finished trip shouldn't keep collecting tags; archive it to stop new tagging while keeping its history readable.
+
 ## See also
 
 - **[Ingesting memories](/guides/ingesting-memories#tagging-memories-to-groups)** — the `group_ids` tagging path
