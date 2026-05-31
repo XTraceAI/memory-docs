@@ -62,7 +62,7 @@ The SDK's `pollUntilDone` helper handles exponential backoff (500ms → 5s) and 
 ```ts
 const results = await client.memories.search({
   query: 'what does the user like to eat?',
-  filters: { user_id: 'alice' },
+  user_id: 'alice',
   limit: 5,
 });
 
@@ -77,5 +77,6 @@ for (const m of results.data) {
 
 - **[Authentication](/guides/authentication)** — get the credentials and use them
 - **[Ingesting memories](/guides/ingesting-memories)** — async/sync trade-offs, polling, what gets extracted
-- **[Searching memories](/guides/searching-memories)** — filter DSL, pagination, retrieval modes
+- **[Searching memories](/guides/searching-memories)** — scoping, search modes, `recall`
+- **[Groups](/guides/groups)** — share memory across users
 - **API Reference** tab — every endpoint, every response shape

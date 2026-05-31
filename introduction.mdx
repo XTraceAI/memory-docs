@@ -3,7 +3,7 @@ title: Introduction
 description: Hosted memory for AI agents. Send conversation turns, get back searchable facts.
 ---
 
-**XTrace Memory Manager** is a hosted memory service for AI agents. You send conversation messages; we extract structured **facts**, **artifacts**, and **episodes** from them, embed each one, and store them in a per-org vector index. You retrieve them later with natural-language search + structured filters.
+**XTrace Memory Manager** is a hosted memory service for AI agents. You send conversation messages; we extract structured **facts**, **artifacts**, and **episodes** from them, embed each one, and store them in a per-org vector index. You retrieve them later with natural-language search — scoped to a single user, or shared across a **group**.
 
 ## Concepts in 30 seconds
 
@@ -13,6 +13,7 @@ description: Hosted memory for AI agents. Send conversation turns, get back sear
 | **Artifact** | A structured object referenced by the conversation (e.g. a doc, code snippet, summary). Server-extracted when content warrants it. |
 | **Episode** | A session-scoped summary spanning a stretch of turns. Bounds the temporal scope of facts. |
 | **Memory** | Umbrella term — every Fact / Artifact / Episode is a Memory, distinguished by its `type` field. |
+| **Group** | A shared tagging target. Tag memories to a group at ingest, and every member can search them — memory shared *across users*, not just within one. |
 
 You don't have to pre-classify anything when you ingest. The server decides what becomes a fact vs an artifact vs an episode.
 
@@ -29,7 +30,10 @@ You don't have to pre-classify anything when you ingest. The server decides what
     Async vs sync ingest, polling for completion
   </Card>
   <Card title="Searching memories" icon="magnifying-glass" href="/guides/searching-memories">
-    Natural-language queries with structured filters
+    Scope by user, group, agent, or app — plus `recall`
+  </Card>
+  <Card title="Groups" icon="users" href="/guides/groups">
+    Share memory across users with group tagging
   </Card>
 </CardGroup>
 
