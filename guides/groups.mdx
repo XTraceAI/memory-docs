@@ -64,8 +64,10 @@ const shared = await client.memories.search({
 ```ts
 const { prompt } = await client.memories.recall({
   query: 'what should we plan for dinner?',
-  user_id: 'alice',       // her dietary prefs
-  group_ids: [trip.id],   // the trip's shared restaurant picks
+  pools: [
+    { user_id: 'alice' },     // her dietary prefs
+    { group_ids: [trip.id] }, // the trip's shared restaurant picks
+  ],
 });
 ```
 
@@ -102,7 +104,7 @@ Archiving is soft (`status` becomes `"archived"`): the group stays readable, but
 **Keep personal personal.** Untagged memories stay private to the user — only tagged ones cross to the group. Scope the group `prompt` to genuinely shared concerns so a user's general preferences don't get pulled into a group they don't belong in.
 
 **Pick the right read for the job:**
-- An agent serving **one user inside a group** → `recall({ user_id, group_ids })` — their own context *plus* the group's, deduped and attributed.
+- An agent serving **one user inside a group** → `recall({ pools: [{ user_id }, { group_ids }] })` — their own context *plus* the group's, deduped and attributed.
 - A **whole-group overview** ("what does the trip know?") → `search({ group_ids })`, omit `user_id`.
 - Don't expect `search({ user_id, group_ids })` to union — it's an **intersection** (see [Searching memories](/guides/searching-memories#personal-and-shared-with-recall)).
 

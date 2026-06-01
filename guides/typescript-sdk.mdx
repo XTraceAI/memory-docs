@@ -124,13 +124,17 @@ Personal **+** shared (group) read in one call. Fans out a `search` per scope, d
 ```ts
 const { prompt, memories, scopes } = await client.memories.recall({
   query: 'what should we plan for dinner on the trip?',
-  user_id: 'alice',             // personal scope
-  group_ids: ['grp_tokyo2026'], // shared scope (any-of)
+  pools: [
+    { user_id: 'alice' },             // personal scope
+    { group_ids: ['grp_tokyo2026'] }, // shared scope (any-of)
+  ],
 });
-// inject `prompt`; `memories` is the deduped, score-ranked union; `scopes` is per-scope counts
+// inject `prompt`; `memories` is the deduped, score-ranked union; `scopes` is per-pool counts
 ```
 
-**Params**: `query` (required), plus at least one of `user_id` / `group_ids`; optional `agent_id`, `app_id`, `mode` (default `compose`), `limit` (default 10).
+Axes **AND** within a pool; pools **OR**. So `[{ user_id }, { app_id: 'product-kb' }]` reads "alice's memories OR the product KB," while `{ user_id, app_id }` in *one* pool would AND them.
+
+**Params**: `query` (required) and `pools` (≥1 pool — each a `ScopePool` of `{ user_id?, group_ids?, agent_id?, app_id? }`); optional `mode` (default `compose`), `limit` (default 10).
 **Options**: `template?` (override the prompt format — see `PromptTemplate`), `render?` (supply your own renderer), `signal?`, `requestId?`.
 
 `renderMemoriesPrompt(memories, opts?)` is also exported standalone if you want to format a memory list yourself.
@@ -254,6 +258,7 @@ import type {
   RecallParams,
   RecallResult,
   RecallScopeStat,
+  ScopePool,
   PromptTemplate,
 
   // Groups
