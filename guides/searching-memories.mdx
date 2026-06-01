@@ -71,8 +71,10 @@ Because scoping is AND-everything, `{ user_id, group_ids }` is an **intersection
 ```ts
 const { prompt, memories } = await client.memories.recall({
   query: 'what should we plan for dinner on the trip?',
-  user_id: 'alice',             // her dietary prefs
-  group_ids: ['grp_tokyo2026'], // the group's shared restaurant picks
+  pools: [
+    { user_id: 'alice' },             // her dietary prefs
+    { group_ids: ['grp_tokyo2026'] }, // the trip's shared restaurant picks
+  ],
 });
 // inject `prompt` into your agent's context
 ```
