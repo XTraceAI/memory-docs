@@ -43,6 +43,41 @@
         ]
       },
       {
+        "tab": "x-vec",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": [
+              "x-vec/introduction",
+              "x-vec/installation",
+              "x-vec/quickstart"
+            ]
+          },
+          {
+            "group": "Core features",
+            "pages": [
+              "x-vec/embedding-models",
+              "x-vec/llm-inference",
+              "x-vec/metadata-filtering"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "x-vec/cli",
+              "x-vec/cli-reference"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "x-vec/managed-service",
+              "x-vec/configuration"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "API Reference",
         "openapi": {
           "source": "https://api.staging.xtrace.ai/openapi.public.json",
