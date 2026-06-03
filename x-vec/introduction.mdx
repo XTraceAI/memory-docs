@@ -1,0 +1,50 @@
+---
+title: x-vec — Encrypted vector search
+description: Semantic search with the privacy guarantees of keeping your data on your own machine. Content is AES-encrypted and embedding vectors are homomorphically encrypted before they ever leave your laptop.
+---
+
+Traditional vector databases require you to hand your data to a third party in plaintext. **x-vec** is different: your document content is AES-encrypted and your embedding vectors are homomorphically encrypted **before they leave your machine**. The server stores and searches over ciphertexts — computing nearest-neighbor Hamming distances directly on encrypted vectors — without ever seeing the underlying data. When results come back, you decrypt them locally.
+
+You get semantic search with the same privacy guarantees as if the data never left your laptop.
+
+<Note>
+**Looking for hosted agent memory?** x-vec is the low-level encrypted vector database. If you want managed memory for AI agents — send conversation turns, get back searchable facts — see the [Memory docs](/introduction) instead.
+</Note>
+
+## Get started
+
+<Note>
+**Create a free account** at [app.xtrace.ai](https://app.xtrace.ai) to get your API key and org ID. The free tier is rate-limited but fully functional.
+</Note>
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/x-vec/installation">
+    Install the Python SDK and optional extras
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/x-vec/quickstart">
+    Concept-first walkthrough with full code examples
+  </Card>
+  <Card title="CLI" icon="terminal" href="/x-vec/cli">
+    Terminal-first workflow — querying in four commands
+  </Card>
+  <Card title="Embedding models" icon="layer-group" href="/x-vec/embedding-models">
+    Ollama, Sentence Transformers, OpenAI, or your own vectors
+  </Card>
+</CardGroup>
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Managed service" icon="server" href="/x-vec/managed-service">
+    `XTraceIntegration` — security model, chunk operations, context management
+  </Card>
+  <Card title="Configuration" icon="gear" href="/x-vec/configuration">
+    Crypto backends, key providers, AWS KMS, environment variables
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/x-vec/cli-reference">
+    Full usage for every `xtrace` command
+  </Card>
+  <Card title="Metadata filtering" icon="filter" href="/x-vec/metadata-filtering">
+    Filter syntax, operators, and privacy trade-offs
+  </Card>
+</CardGroup>
