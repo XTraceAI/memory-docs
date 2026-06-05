@@ -43,7 +43,7 @@
         ]
       },
       {
-        "tab": "x-vec",
+        "tab": "Encrypted Vector DB",
         "groups": [
           {
             "group": "Getting started",
