@@ -31,7 +31,8 @@
               "guides/authentication",
               "guides/ingesting-memories",
               "guides/searching-memories",
-              "guides/groups"
+              "guides/groups",
+              "guides/webhooks"
             ]
           },
           {
