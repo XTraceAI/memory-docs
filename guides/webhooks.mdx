@@ -13,7 +13,7 @@ The motivating case is a "memory is ready" gate: an app that wants to tell its u
 - **Two events.** `memory.learning.completed` and `memory.learning.failed` (see [Events](#events)).
 - **Signed.** Every request carries an `X-Webhook-Signature` HMAC so you can verify it really came from XTrace (see [Verifying the signature](#verifying-the-signature)).
 - **Correlated by your own ids.** The payload echoes back the `conv_id` and `user_id` you sent at ingest, so you can match a delivery to the originating conversation.
-- **Best-effort.** Delivery is at-most-once with a few quick retries. Treat the job-polling endpoint as your fallback (see [Delivery semantics](#delivery-semantics)).
+- **Best-effort.** Delivery has a few quick retries, but an event may still be dropped or duplicated — dedupe on `job_id` and treat the job-polling endpoint as your fallback (see [Delivery semantics](#delivery-semantics)).
 
 ## 1. Register your endpoint
 
@@ -156,11 +156,12 @@ Respond with any `2xx` to acknowledge. A non-`2xx` (or a timeout) is treated as 
 
 ## Delivery semantics
 
-Delivery is **best-effort, at-most-once**:
+Delivery is **best-effort** — a delivery may be **dropped or duplicated**, so it's neither strictly at-most-once nor at-least-once:
 
 - On a non-`2xx` or a network error, XTrace retries a few times with a short backoff, then gives up. A `4xx` (other than `408`/`429`) is treated as a permanent rejection and **not** retried.
-- Deliveries are independent of the ingest job. A dropped webhook never changes the job's outcome — the memories are already stored.
-- **Your fallback is the job endpoint.** If a delivery is ever lost, `GET /v1/memories/jobs/{job_id}` still returns the terminal result. For anything you can't afford to miss, reconcile against it rather than relying on the webhook alone.
+- **Duplicates are possible.** If your handler processes the event but its `2xx` is lost (or times out) before XTrace records it, the retry delivers the same event again. **Dedupe on `job_id`.**
+- **Drops are possible.** If every retry fails, the event is given up on. Deliveries are independent of the ingest job — a dropped webhook never changes the job's outcome (the memories are already stored).
+- **Your fallback is the job endpoint.** `GET /v1/memories/jobs/{job_id}` always returns the terminal result. For anything you can't afford to miss, reconcile against it rather than relying on the webhook alone.
 
 Deliveries are **not** strictly ordered — use `timestamp` if you need to reason about ordering.
 
@@ -196,7 +197,7 @@ curl -X DELETE https://api.production.xtrace.ai/v1/webhooks \
 
 **Acknowledge fast, work async.** Return `2xx` quickly and do any heavy work after. A slow handler looks like a failed delivery and gets retried.
 
-**Make your handler idempotent.** Retries (and at-most-once semantics) mean you should key on `job_id` so a re-delivery doesn't double-process.
+**Make your handler idempotent.** Retries mean the same event can arrive more than once — key on `job_id` so a re-delivery doesn't double-process.
 
 **Reconcile critical flows against the job endpoint.** Webhooks are best-effort; if a step truly cannot be missed, fall back to `GET /v1/memories/jobs/{job_id}`.
 
