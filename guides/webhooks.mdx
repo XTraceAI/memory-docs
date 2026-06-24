@@ -1,0 +1,209 @@
+---
+title: Webhooks
+description: Get a signed push notification the moment memory learning finishes for a conversation — instead of polling the job endpoint.
+---
+
+Ingest is [asynchronous](/guides/ingesting-memories): you send conversation turns and the server extracts memories in the background. Normally you'd poll `GET /v1/memories/jobs/{job_id}` to find out when it's done. **Webhooks** flip that around — register one URL and XTrace POSTs to it the moment learning **completes or fails** for a conversation.
+
+The motivating case is a "memory is ready" gate: an app that wants to tell its user *"we've learned from that conversation"* before letting them continue. Polling makes that laggy and chatty; a webhook makes it a push.
+
+## The model
+
+- **One endpoint per org.** You register a single subscriber URL — there are no per-conversation subscriptions to manage. Every terminal ingest job for the org fires to that one URL.
+- **Two events.** `memory.learning.completed` and `memory.learning.failed` (see [Events](#events)).
+- **Signed.** Every request carries an `X-Webhook-Signature` HMAC so you can verify it really came from XTrace (see [Verifying the signature](#verifying-the-signature)).
+- **Correlated by your own ids.** The payload echoes back the `conv_id` and `user_id` you sent at ingest, so you can match a delivery to the originating conversation.
+- **Best-effort.** Delivery is at-most-once with a few quick retries. Treat the job-polling endpoint as your fallback (see [Delivery semantics](#delivery-semantics)).
+
+## 1. Register your endpoint
+
+`PUT /v1/webhooks` with the URL XTrace should call. It must be **HTTPS** and resolve to a public address.
+
+```bash
+curl -X PUT https://api.production.xtrace.ai/v1/webhooks \
+  -H "Authorization: Bearer $XTRACE_API_KEY" \
+  -H "X-Org-Id: $XTRACE_ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{ "url": "https://your-app.com/hooks/xtrace" }'
+```
+
+```json Response
+{
+  "object": "webhook",
+  "url": "https://your-app.com/hooks/xtrace",
+  "events": ["memory.learning.completed", "memory.learning.failed"],
+  "enabled": true,
+  "secret": "whsec_<your-signing-secret-shown-once>",
+  "created_at": "2026-06-24T00:59:32Z",
+  "updated_at": "2026-06-24T00:59:32Z"
+}
+```
+
+<Warning>
+The full `secret` is returned **only here** — on first create, or when you rotate it. Store it now. Every later `GET` returns it masked (`whsec_••••wxyz`). You need the full value to verify signatures.
+</Warning>
+
+`PUT` is create-or-replace: call it again to change the URL or events. By default it **keeps the existing secret** (so an edit doesn't break verification); pass `?rotate_secret=true` to mint a fresh one.
+
+To subscribe to only one event, pass `events`:
+
+```json
+{ "url": "https://your-app.com/hooks/xtrace", "events": ["memory.learning.completed"] }
+```
+
+## Events
+
+| Event | When it fires | Carries |
+|---|---|---|
+| `memory.learning.completed` | The ingest job succeeded. **Fires even when nothing was extracted** (`memories: []`). | `memories`, `memories_updated` |
+| `memory.learning.failed` | Extraction errored. | `error` |
+
+<Note>
+`completed` is a **"this conversation has been processed"** signal, not a "we found something" one. A conversation that yields no new memory still fires `completed` with an empty `memories` array — so an app gating on "memory is ready" always gets unblocked. Don't treat `memories: []` as an error.
+</Note>
+
+### Payload
+
+```json memory.learning.completed
+{
+  "event": "memory.learning.completed",
+  "job_id": "job_2f0c0e181daa4a2bae4324c69c22b1fb",
+  "conv_id": "conv_2026_05_16",
+  "user_id": "alice",
+  "memories": [
+    { "id": "68a38338-a9a3-469d-abe9-c93e140ee40f", "type": "fact" }
+  ],
+  "memories_updated": [],
+  "timestamp": "2026-06-24T00:59:38Z"
+}
+```
+
+```json memory.learning.failed
+{
+  "event": "memory.learning.failed",
+  "job_id": "job_…",
+  "conv_id": "conv_2026_05_16",
+  "user_id": "alice",
+  "error": { "type": "server_error", "code": "ingest_failed", "message": "Memory extraction failed" },
+  "timestamp": "2026-06-24T00:59:38Z"
+}
+```
+
+- `conv_id` / `user_id` are the exact values you passed to [`POST /v1/memories`](/guides/ingesting-memories) — use them to correlate the delivery back to the originating conversation.
+- `memories` are thin refs (`{ id, type }`). Fetch the full row with `GET /v1/memories/{id}` when you need the content.
+
+## Verifying the signature
+
+Every delivery includes:
+
+```http
+X-Webhook-Event: memory.learning.completed
+X-Webhook-Signature: sha256=<hex-hmac-sha256-of-the-raw-body>
+```
+
+The signature is `sha256=` + an HMAC-SHA256 of the **raw request body bytes**, keyed by your webhook `secret`. Recompute it over the bytes you received (before any JSON parsing) and constant-time compare.
+
+<Warning>
+Verify against the **raw body**, not a re-serialized object. Re-encoding the JSON can reorder keys or change whitespace and the signature won't match.
+</Warning>
+
+```ts Node / Express
+import crypto from 'node:crypto';
+import express from 'express';
+
+const app = express();
+const SECRET = process.env.XTRACE_WEBHOOK_SECRET!;
+
+// Capture the RAW body for signature verification.
+app.post('/hooks/xtrace', express.raw({ type: 'application/json' }), (req, res) => {
+  const sig = req.header('X-Webhook-Signature') ?? '';
+  const expected =
+    'sha256=' + crypto.createHmac('sha256', SECRET).update(req.body).digest('hex');
+
+  if (
+    sig.length !== expected.length ||
+    !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))
+  ) {
+    return res.status(401).end();
+  }
+
+  const event = JSON.parse(req.body.toString());
+  // event.conv_id, event.user_id, event.memories …
+  res.status(200).end();
+});
+```
+
+```python Python / Flask
+import hashlib
+import hmac
+from flask import Flask, request, abort
+
+app = Flask(__name__)
+SECRET = os.environ["XTRACE_WEBHOOK_SECRET"]
+
+@app.post("/hooks/xtrace")
+def hook():
+    raw = request.get_data()  # raw bytes
+    expected = "sha256=" + hmac.new(SECRET.encode(), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, request.headers.get("X-Webhook-Signature", "")):
+        abort(401)
+    event = request.get_json()
+    # event["conv_id"], event["user_id"], event["memories"] …
+    return "", 200
+```
+
+Respond with any `2xx` to acknowledge. A non-`2xx` (or a timeout) is treated as a failed delivery and retried (see below).
+
+## Delivery semantics
+
+Delivery is **best-effort, at-most-once**:
+
+- On a non-`2xx` or a network error, XTrace retries a few times with a short backoff, then gives up. A `4xx` (other than `408`/`429`) is treated as a permanent rejection and **not** retried.
+- Deliveries are independent of the ingest job. A dropped webhook never changes the job's outcome — the memories are already stored.
+- **Your fallback is the job endpoint.** If a delivery is ever lost, `GET /v1/memories/jobs/{job_id}` still returns the terminal result. For anything you can't afford to miss, reconcile against it rather than relying on the webhook alone.
+
+Deliveries are **not** strictly ordered — use `timestamp` if you need to reason about ordering.
+
+## Managing the webhook
+
+```bash
+# Read current config (secret masked)
+curl https://api.production.xtrace.ai/v1/webhooks \
+  -H "Authorization: Bearer $XTRACE_API_KEY" -H "X-Org-Id: $XTRACE_ORG_ID"
+
+# Rotate the signing secret (returns the new full secret once)
+curl -X PUT "https://api.production.xtrace.ai/v1/webhooks?rotate_secret=true" \
+  -H "Authorization: Bearer $XTRACE_API_KEY" -H "X-Org-Id: $XTRACE_ORG_ID" \
+  -H "Content-Type: application/json" -d '{ "url": "https://your-app.com/hooks/xtrace" }'
+
+# Pause without losing the URL
+curl -X PUT https://api.production.xtrace.ai/v1/webhooks \
+  -H "Authorization: Bearer $XTRACE_API_KEY" -H "X-Org-Id: $XTRACE_ORG_ID" \
+  -H "Content-Type: application/json" -d '{ "url": "https://your-app.com/hooks/xtrace", "enabled": false }'
+
+# Remove it entirely (idempotent — always 204)
+curl -X DELETE https://api.production.xtrace.ai/v1/webhooks \
+  -H "Authorization: Bearer $XTRACE_API_KEY" -H "X-Org-Id: $XTRACE_ORG_ID"
+```
+
+## Best practices
+
+**Always verify the signature.** Your endpoint is public; the signature is what proves a request is from XTrace and wasn't tampered with. Reject anything that doesn't verify.
+
+**Verify against the raw body.** Capture the bytes before parsing (`express.raw`, `request.get_data()`), or you'll re-serialize and break the comparison.
+
+**Treat `completed` as "processed," not "found."** An empty `memories` array is a normal success — it means the conversation produced no new memory, and your "ready" gate should still release.
+
+**Acknowledge fast, work async.** Return `2xx` quickly and do any heavy work after. A slow handler looks like a failed delivery and gets retried.
+
+**Make your handler idempotent.** Retries (and at-most-once semantics) mean you should key on `job_id` so a re-delivery doesn't double-process.
+
+**Reconcile critical flows against the job endpoint.** Webhooks are best-effort; if a step truly cannot be missed, fall back to `GET /v1/memories/jobs/{job_id}`.
+
+**Keep the secret server-side.** It's an org-wide signing key — never ship it to a browser. Rotate it (`?rotate_secret=true`) if it leaks.
+
+## See also
+
+- **[Ingesting memories](/guides/ingesting-memories)** — the async job lifecycle webhooks notify on
+- **[Authentication](/guides/authentication)** — the `Authorization` + `X-Org-Id` headers used to manage the webhook
+- **API Reference** — `PUT` / `GET` / `DELETE /v1/webhooks` request and response schemas
