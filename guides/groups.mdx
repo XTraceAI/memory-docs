@@ -1,6 +1,6 @@
 ---
 title: Groups
-description: Share memory across users. Register a group, tag memories to it at ingest, and let every member search them.
+description: Share memory across users. Register a group — prompted or catch-all — tag memories to it at ingest, and let every member search them.
 ---
 
 By default a memory is scoped to the `user_id` that ingested it. **Groups** let you share memory *across users*: tag a memory to a group at ingest, and anyone who searches that group can see it.
@@ -9,11 +9,16 @@ The motivating case is collaborative agents — e.g. a **travel-planning** assis
 
 ## The model
 
-- A **group** is a registry entry with a `name` and a `prompt`. The `prompt` describes *what belongs* in the group — it's what the ingest classifier reads to decide which extracted memories to tag.
+- A **group** is a registry entry with a `name` and an *optional* `prompt`. The prompt determines the group's mode:
+  - **Prompted** — the group has a `prompt` describing *what belongs* in it. The ingest classifier reads it and tags a memory only when the prompt clearly applies.
+  - **Catch-all** — the group has no `prompt`. It receives **every** extracted memory judged shareable, with no per-group matching.
+- **The personal gate applies to every group.** Before any tagging, the classifier judges each extracted memory personal vs. shareable; personal memories are never group-tagged, whatever the group's mode. See [The personal gate](#the-personal-gate).
 - Group ids are server-generated, unguessable handles (`grp_…`). **Knowing the id is the access boundary** — your client decides which users belong to which groups and which ids to send; the memory service doesn't track membership.
 - Tagging is **additive**: tagging a memory to a group never removes it from the author's own scope.
 
 ## 1. Register a group
+
+**Prompted** — pass a `prompt` describing what belongs:
 
 ```ts
 const trip = await client.groups.create({
@@ -28,9 +33,21 @@ console.log(trip.id); // "grp_4f14…"
 
 Write the `prompt` the way you'd brief the classifier: concrete about what to include. A sharp prompt ("facts about the **Tokyo** trip") tags precisely; a vague one over- or under-tags.
 
+**Catch-all** — omit the `prompt` entirely (or send `null`):
+
+```ts
+const workspace = await client.groups.create({
+  name: 'Trip workspace', // no prompt → catch-all
+});
+```
+
+<Note>
+Only *omitting* `prompt` (or sending `null`) creates a catch-all. An empty string is rejected with `422` — a blank field from a buggy client can't silently turn a group into a catch-all.
+</Note>
+
 ## 2. Tag memories at ingest
 
-Pass the group ids in `group_ids`. At extraction time the classifier reads each group's prompt and tags the extracted memories that belong to it.
+Pass the group ids in `group_ids`. At extraction time the classifier tags each extracted memory:
 
 ```ts
 await client.memories.ingest({
@@ -40,13 +57,23 @@ await client.memories.ingest({
   ],
   user_id: 'alice',
   conv_id: 'conv_2026_05_16',
-  group_ids: [trip.id],
+  group_ids: [trip.id, workspace.id],
 });
 ```
 
-- Each extracted memory is tagged with the **subset** of `group_ids` it belongs to — several, one, or none. ("Stays near Shibuya" → tagged to the Tokyo trip; "I'm vegetarian" → likely left untagged, as a general preference.)
+- Each **shareable** extracted memory is tagged with the prompted groups its content matches **plus every requested catch-all group** — several, one, or none. ("Stays near Shibuya" → the Tokyo trip *and* the workspace; an off-topic but shareable aside → the workspace only.)
+- **Personal** memories are never tagged to any group — see [the personal gate](#the-personal-gate).
 - Unknown or archived ids are **soft-skipped** (never fail the ingest) and returned in `result.ignored_group_ids`.
 - Up to **20** group ids per ingest; more returns `422`.
+
+## The personal gate
+
+Every extracted memory is first judged **personal vs. shareable**, and personal memories are *never* group-tagged — not by prompted groups, not by catch-alls. This is the privacy backstop that makes catch-alls safe: passing a group id doesn't mean everything in the conversation crosses to the group.
+
+- **Personal** means private or sensitive circumstances: health, family matters, private feelings, finances, credentials.
+- Merely being *about* the user does **not** make a memory personal. "Alice is vegetarian" on a shared-trip ingest is shareable — the group needs it to plan dinner. "Alice's father is in the hospital" is personal, even if it came up while discussing trip dates.
+- Personal memories are **not dropped**. They're stored in the authoring user's personal scope like any untagged memory and remain fully retrievable there (`search({ user_id })`, `recall`). The gate only controls *sharing*.
+- The gate **fails closed**: if the personal-vs-shareable verdict is unavailable, the memory is left untagged rather than shared.
 
 ## 3. Read shared memories back
 
@@ -86,31 +113,41 @@ await client.groups.update(trip.id, { prompt: '…' }); // re-prompt the classif
 await client.groups.archive(trip.id);                // soft-archive
 ```
 
+Prompt edits are a one-way door:
+
+- **Adding** a prompt to a catch-all group is allowed — it becomes a *prompted* group from then on, and new ingests match against the prompt.
+- **Removing** a prompt is not: `null` on update means "keep the existing prompt", and an empty string is a `422`. Once a group is prompted, it stays prompted.
+- Prompt changes never retroactively re-tag existing memories — they only steer future ingests.
+
 Archiving is soft (`status` becomes `"archived"`): the group stays readable, but it's **dropped from future ingest tagging** — a stale id passed on ingest just lands in `ignored_group_ids`. Re-activate by `update(id, { status: 'active' })`.
 
 ## Best practices
 
+**Pick the mode that matches the ingest.** A **catch-all** fits a shared workspace or trip bucket where the conversations you ingest are *already about* the shared context — everything shareable from them belongs to the group, so per-memory matching would only lose facts. A **prompted** group fits a curated topical slice — the conversations mix concerns and only some of it belongs (e.g. a team channel's ingests feeding a narrow "on-call runbook facts" group).
+
+**Expect lower search precision on catch-alls — by design.** A catch-all trades precision for recall: it accumulates *everything* shareable from its ingests, so a group-scoped search over it surfaces more loosely related neighbors than a search over a sharply prompted group. If group-search quality matters more than capture-everything coverage, use a prompted group.
+
 **Model a group around a real shared boundary.** A group should map to something multiple users genuinely share — a trip, a project, a workspace channel — not a single user (that's what `user_id` is for) and not a throwaway topic. If only one person will ever read it, it doesn't need to be a group.
 
-**Write the `prompt` like a brief to the classifier.** It's the *only* signal used to decide what gets tagged. Name the subject so unrelated facts don't leak in:
+**For prompted groups, write the `prompt` like a brief to the classifier.** It's the *only* signal used to decide what gets tagged. Name the subject so unrelated facts don't leak in:
 
 | | Prompt |
 |---|---|
 | ✅ Sharp | "Facts about the **Tokyo trip in May 2026**: flights, hotels, restaurants, reservations, and dietary needs for *this trip*." |
 | ❌ Vague | "Travel stuff." — over- or under-tags |
 
-**Send only the groups the user is actually in.** Your app owns membership; pass the `group_ids` relevant to *this* conversation, not every group in the org. A tighter list means sharper tagging and less cross-trip noise. (Max 20 per ingest.)
+**Send only the groups the user is actually in.** Your app owns membership; pass the `group_ids` relevant to *this* conversation, not every group in the org. This matters doubly for catch-alls: every shareable memory lands in *every* catch-all you pass, so a stray catch-all id pollutes that group with an unrelated conversation. (Max 20 per ingest.)
 
-**Keep personal personal.** Untagged memories stay private to the user — only tagged ones cross to the group. Scope the group `prompt` to genuinely shared concerns so a user's general preferences don't get pulled into a group they don't belong in.
+**Don't lean on the personal gate for topical scoping.** The gate keeps private and sensitive content (health, family, finances, credentials) out of *all* groups server-side — but it's a privacy backstop, not a relevance filter. An off-topic but shareable fact still lands in a catch-all. Scope which ids you send — and prompted groups' prompts — to control *topic*; let the gate handle *privacy*.
 
 **Pick the right read for the job:**
 - An agent serving **one user inside a group** → `recall({ pools: [{ user_id }, { group_ids }] })` — their own context *plus* the group's, deduped and attributed.
 - A **whole-group overview** ("what does the trip know?") → `search({ group_ids })`, omit `user_id`.
 - Don't expect `search({ user_id, group_ids })` to union — it's an **intersection** (see [Searching memories](/guides/searching-memories#personal-and-shared-with-recall)).
 
-**Treat tagging as best-effort.** Whether a fact lands in a group is an LLM relevance call, not a guarantee — don't build logic that *requires* a specific fact to be tagged. Always read `result.ignored_group_ids` to catch unknown or archived ids.
+**Treat tagging as best-effort.** Whether a fact lands in a group is an LLM relevance call, not a guarantee — and the personal gate fails closed, leaving a memory untagged when its verdict is unavailable. Don't build logic that *requires* a specific fact to be tagged. Always read `result.ignored_group_ids` to catch unknown or archived ids.
 
-**Group ids are the access boundary.** They're unguessable (`grp_…`) and the service doesn't track membership — your app decides who can read a group. Don't expose a group id to anyone who shouldn't see the group, and don't tag anything you wouldn't want *every* member to read.
+**Group ids are the access boundary.** They're unguessable (`grp_…`) and the service doesn't track membership — your app decides who can read a group. Don't expose a group id to anyone who shouldn't see the group, and don't tag anything you wouldn't want *every* member to read — especially a catch-all, where everything shareable crosses over.
 
 **Archive groups when they're done.** A finished trip shouldn't keep collecting tags; archive it to stop new tagging while keeping its history readable.
 
