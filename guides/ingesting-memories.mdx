@@ -29,7 +29,7 @@ Every ingest needs:
 - `user_id` — keys the per-user session namespace
 - `conv_id` — anchors every extracted memory to a conversation (for replay, export, bulk retract)
 
-Optional: `agent_id`, `app_id`, `group_ids` (tag the extracted memories to shared [groups](/guides/groups)), `timestamp_format` (a `strptime` format for parsing dated turns on the batch path), `extract_artifacts` (defaults to `true` — pass `false` to skip the artifact-extraction stage, the most expensive part of the pipeline).
+Optional: `agent_id`, `app_id`, `group_ids` (tag the extracted memories to shared [groups](/guides/groups) — memories judged personal, e.g. health or finances, are never group-tagged), `timestamp_format` (a `strptime` format for parsing dated turns on the batch path), `extract_artifacts` (defaults to `true` — pass `false` to skip the artifact-extraction stage, the most expensive part of the pipeline).
 
 ## Async ingest (default)
 
@@ -97,7 +97,7 @@ The `result.memories_created` array tells you what landed; each entry is a thin 
 
 ## Tagging memories to groups
 
-Pass `group_ids` to associate this ingest with one or more **groups** — shared tagging targets you register up front (see [Groups](/guides/groups)). At extraction time a classifier reads each group's `prompt` and tags the extracted memories that belong to it. Other members of the group can then surface those memories with a [group search](/guides/searching-memories#scoping-a-search).
+Pass `group_ids` to associate this ingest with one or more **groups** — shared tagging targets you register up front (see [Groups](/guides/groups)). At extraction time a classifier tags each extracted memory: **prompted** groups get the memories their `prompt` matches, and **catch-all** groups (registered without a prompt) get every shareable memory. Other members of the group can then surface those memories with a [group search](/guides/searching-memories#scoping-a-search).
 
 ```ts
 await client.memories.ingest({
@@ -112,6 +112,7 @@ await client.memories.ingest({
 ```
 
 - The classifier tags each extracted memory with the **subset** of `group_ids` it belongs to — a memory can land in several groups, one, or none. Untagged extraction still happens as usual; tagging is additive.
+- Memories judged **personal** (private/sensitive: health, family matters, finances, credentials) are never group-tagged — they stay in the author's personal scope, fully retrievable there. See [the personal gate](/guides/groups#the-personal-gate).
 - Unknown or archived ids are **soft-skipped** — they never fail the ingest, and come back in `result.ignored_group_ids` so you can prune stale ids client-side.
 - Up to **20** group ids per ingest; more returns `422`.
 

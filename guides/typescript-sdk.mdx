@@ -176,7 +176,7 @@ const trip = await client.groups.create({
 
 | Method | Returns | Notes |
 |---|---|---|
-| `create({ name, prompt })` | `Group` | `prompt` tells the ingest classifier what belongs to this group |
+| `create({ name, prompt? })` | `Group` | `prompt` tells the ingest classifier what belongs to this group; omit it for a [catch-all](/guides/groups#the-model) that receives every shareable memory |
 | `list()` | `Group[]` | all groups (active + archived) |
 | `get(id)` | `Group` | |
 | `update(id, { name?, prompt?, status? })` | `Group` | edit / re-prompt; `status: 'archived'` archives |
